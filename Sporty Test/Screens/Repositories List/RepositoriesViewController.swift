@@ -32,9 +32,9 @@ final class RepositoriesViewController: UITableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-
+        tableView.rowHeight = UITableView.automaticDimension
         tableView.register(RepositoryTableViewCell.self,
-                           forCellReuseIdentifier: "RepositoryCell")
+                           forCellReuseIdentifier: RepositoryTableViewCell.reuseID)
 
         // Task E: Pull-to-refresh
         // Since the project's iOS target is +15.0, we can use UIAction instead of a @objc private method
@@ -76,8 +76,7 @@ extension RepositoriesViewController {
     override func tableView(
         _ tableView: UITableView,
         cellForRowAt indexPath: IndexPath
-    ) -> UITableViewCell
-    {
+    ) -> UITableViewCell {
         let repo = repositories[indexPath.row]
         // Replacing cell force-cast with a safe empty cell in case of failure
         guard let cell = tableView.dequeueReusableCell(
