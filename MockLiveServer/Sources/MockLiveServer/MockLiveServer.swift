@@ -30,7 +30,7 @@ public actor MockLiveServer {
 
     private func removeSubscription(repoId: Int, subscriptionUUID: UUID) {
         subscribers[repoId]?.removeValue(forKey: subscriptionUUID)
-        if self.subscribers[repoId, default: [:]].isEmpty {
+        if subscribers[repoId, default: [:]].isEmpty {
             subscribedRepos[repoId]?.cancel()
             subscribedRepos[repoId] = nil
         }
@@ -42,10 +42,10 @@ public actor MockLiveServer {
             var starsCount = currentStars
 
             while !Task.isCancelled {
-                try await Task.sleep(for: .milliseconds(.random(in: 100...1000)))
+                try await Task.sleep(for: .milliseconds(.random(in: 100 ... 1000)))
                 guard let self else { break }
 
-                starsCount += .random(in: 1...3)
+                starsCount += .random(in: 1 ... 3)
 
                 for subscriber in await subscribers[repoId, default: [:]].values {
                     subscriber(starsCount)
@@ -53,5 +53,4 @@ public actor MockLiveServer {
             }
         }
     }
-
 }

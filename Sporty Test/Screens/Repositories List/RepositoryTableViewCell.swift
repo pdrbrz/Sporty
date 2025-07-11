@@ -124,7 +124,11 @@ final class RepositoryTableViewCell: UITableViewCell {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+}
+
+extension RepositoryTableViewCell {
+    static let reuseID = "RepositoryCell"
 }

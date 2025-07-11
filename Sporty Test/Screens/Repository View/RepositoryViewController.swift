@@ -17,7 +17,7 @@ final class RepositoryViewController: UIViewController {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -82,7 +82,7 @@ private struct RepositoryView: View {
             }
         }
         .task {
-            do  {
+            do {
                 fullRepository = try await gitHubAPI.repository(minimalRepository.fullName)
             } catch {
                 print("Error loading full repository: \(error)")
