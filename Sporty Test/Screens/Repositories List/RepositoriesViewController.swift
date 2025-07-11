@@ -1,15 +1,14 @@
 import Combine
 import GitHubAPI
 import MockLiveServer
-import SwiftUI
 import UIKit
 
-/// A view controller that displays a list of GitHub repositories for the "swiftlang" organization.
-final class RepositoriesViewController: UITableViewController {
+/// Lists the public repositories of the “swiftlang” organization.
+final class RepositoriesViewController: UIViewController {
     // MARK: - Constants
 
     private enum Constants {
-        static let cellIdentifier = "RepositoryCell"
+        static let organisation = "swiftlang"
     }
 
     // MARK: - Properties
@@ -18,62 +17,83 @@ final class RepositoriesViewController: UITableViewController {
     private let mockLiveServer: MockLiveServer
     private var repositories: [GitHubMinimalRepository] = []
 
+    // MARK: - View
+
+    private let contentView = RepositoriesView()
+
     // MARK: - Life cycle
 
     init(gitHubAPI: GitHubAPI, mockLiveServer: MockLiveServer) {
         self.gitHubAPI = gitHubAPI
         self.mockLiveServer = mockLiveServer
-        super.init(style: .insetGrouped)
-        title = "swiftlang"
+        super.init(nibName: nil, bundle: nil)
+        title = Constants.organisation
     }
 
     @available(*, unavailable)
     required init?(coder _: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    override func loadView() {
+        view = contentView
+    }
+
+    override func viewWillAppear(_: Bool) {
+        contentView.layoutSubviews()
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        tableView.rowHeight = UITableView.automaticDimension
-        tableView.register(RepositoryTableViewCell.self,
-                           forCellReuseIdentifier: RepositoryTableViewCell.reuseID)
-
-        // Task E: Pull-to-refresh
-        // Since the project's iOS target is +15.0, we can use UIAction instead of a @objc private method
-        refreshControl = UIRefreshControl()
-        refreshControl?.addAction(UIAction { _ in
-            Task { await self.loadRepositories() }
-        }, for: .valueChanged)
-
+        configureTableView()
+        configureRefresh()
         Task { await loadRepositories() }
     }
 
-    // MARK: - Data loading
+    // MARK: - Setup
+
+    private func configureTableView() {
+        contentView.tableView.dataSource = self
+        contentView.tableView.delegate = self
+    }
+
+    private func configureRefresh() {
+        // Task E: Pull-to-refresh
+        // Since the project's iOS target is +15.0, we can use UIAction instead of a @objc private method
+        contentView.refreshControl.addAction(
+            UIAction { [weak self] _ in
+                guard let self else { return }
+                Task { await self.loadRepositories() }
+            },
+            for: .valueChanged
+        )
+    }
+
+    // MARK: - Networking
 
     private func loadRepositories() async {
         do {
-            repositories = try await gitHubAPI.repositoriesForOrganisation("swiftlang")
-            tableView.reloadData()
+            repositories = try await gitHubAPI.repositoriesForOrganisation(Constants.organisation)
+            await MainActor.run {
+                /// Name label height needs to be improved on first view load
+                contentView.tableView.reloadData()
+                contentView.tableView.layoutIfNeeded()
+            }
         } catch {
             print("Error loading repositories:", error)
         }
-        await MainActor.run { self.refreshControl?.endRefreshing() }
+        await MainActor.run { contentView.refreshControl.endRefreshing() }
     }
 }
 
-// MARK: - Extensions
+// MARK: - UITableViewDataSource & UITableViewDelegate
 
-// MARK: Table View
+extension RepositoriesViewController: UITableViewDataSource, UITableViewDelegate {
+    func numberOfSections(in _: UITableView) -> Int { 1 }
 
-extension RepositoriesViewController {
-    override func numberOfSections(in _: UITableView) -> Int { 1 }
-
-    override func tableView(
-        _: UITableView,
-        numberOfRowsInSection _: Int
-    ) -> Int {
+    func tableView(_: UITableView, numberOfRowsInSection _: Int) -> Int {
         repositories.count
     }
 
-    override func tableView(
+    func tableView(
         _ tableView: UITableView,
         cellForRowAt indexPath: IndexPath
     ) -> UITableViewCell {
@@ -93,15 +113,9 @@ extension RepositoriesViewController {
         return cell
     }
 
-    override func tableView(
-        _: UITableView,
-        didSelectRowAt indexPath: IndexPath
-    ) {
+    func tableView(_: UITableView, didSelectRowAt indexPath: IndexPath) {
         let repo = repositories[indexPath.row]
-        let vc = RepositoryViewController(
-            minimalRepository: repo,
-            gitHubAPI: gitHubAPI
-        )
+        let vc = RepositoryViewController(minimalRepository: repo, gitHubAPI: gitHubAPI)
         show(vc, sender: self)
     }
 }
