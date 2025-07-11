@@ -3,25 +3,22 @@ import GitHubAPI
 import MockLiveServer
 import UIKit
 
-/// Lists the public repositories of the “swiftlang” organization.
 final class RepositoriesViewController: UIViewController {
-    // MARK: - Constants
+    // MARK: Constants
 
-    private enum Constants {
-        static let organisation = "swiftlang"
-    }
+    private enum Constants { static let organisation = "swiftlang" }
 
-    // MARK: - Properties
-
-    private let gitHubAPI: GitHubAPI
-    private let mockLiveServer: MockLiveServer
-    private var repositories: [GitHubMinimalRepository] = []
-
-    // MARK: - View
+    // MARK: Stored state
 
     private let contentView = RepositoriesView()
+    private let gitHubAPI: GitHubAPI
+    private let mockLiveServer: MockLiveServer
 
-    // MARK: - Life cycle
+    @MainActor private var liveStarCounts: [Int: Int] = [:]
+    @MainActor private var liveStarSubscriptions: [Int: AnyCancellable] = [:]
+    @MainActor private var repositories: [GitHubMinimalRepository] = []
+
+    // MARK: Init
 
     init(gitHubAPI: GitHubAPI, mockLiveServer: MockLiveServer) {
         self.gitHubAPI = gitHubAPI
@@ -33,13 +30,9 @@ final class RepositoriesViewController: UIViewController {
     @available(*, unavailable)
     required init?(coder _: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    override func loadView() {
-        view = contentView
-    }
+    // MARK: View life-cycle
 
-    override func viewWillAppear(_: Bool) {
-        contentView.layoutSubviews()
-    }
+    override func loadView() { view = contentView }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -48,7 +41,11 @@ final class RepositoriesViewController: UIViewController {
         Task { await loadRepositories() }
     }
 
-    // MARK: - Setup
+    deinit {
+        liveStarSubscriptions.values.forEach { $0.cancel() }
+    }
+
+    // MARK: Setup
 
     private func configureTableView() {
         contentView.tableView.dataSource = self
@@ -60,27 +57,71 @@ final class RepositoriesViewController: UIViewController {
         // Since the project's iOS target is +15.0, we can use UIAction instead of a @objc private method
         contentView.refreshControl.addAction(
             UIAction { [weak self] _ in
-                guard let self else { return }
-                Task { await self.loadRepositories() }
+                Task { await self?.loadRepositories() }
             },
             for: .valueChanged
         )
     }
 
-    // MARK: - Networking
+    // MARK: Networking
 
     private func loadRepositories() async {
         do {
-            repositories = try await gitHubAPI.repositoriesForOrganisation(Constants.organisation)
+            let fetched = try await gitHubAPI.repositoriesForOrganisation(Constants.organisation)
+
             await MainActor.run {
-                /// Name label height needs to be improved on first view load
+                repositories = fetched
                 contentView.tableView.reloadData()
                 contentView.tableView.layoutIfNeeded()
             }
+
+            await subscribeToLiveStars()
         } catch {
             print("Error loading repositories:", error)
         }
+
         await MainActor.run { contentView.refreshControl.endRefreshing() }
+    }
+
+    // MARK: Live-star feed
+
+    /// Re-subscribes every repo to `MockLiveServer`.
+    /// Task G: Real time updates for star counting using MockLiveServer
+    /// Used AI Assistant to navigate me through Combine
+    @MainActor
+    private func subscribeToLiveStars() async {
+        liveStarSubscriptions.values.forEach { $0.cancel() }
+        liveStarSubscriptions.removeAll()
+        liveStarCounts.removeAll()
+
+        for repo in repositories {
+            do {
+                // Call to actor-isolated method ⇒ needs `await`.
+                let cancellable = try await mockLiveServer.subscribeToRepo(
+                    repoId: repo.id,
+                    currentStars: repo.stargazersCount
+                ) { [weak self] newStars in
+                    guard let self else { return }
+
+                    // Hop to the main actor for state and UI changes.
+                    Task { @MainActor in
+                        self.liveStarCounts[repo.id] = newStars
+
+                        if let row = self.repositories.firstIndex(where: { $0.id == repo.id }),
+                           let cell = self.contentView.tableView
+                           .cellForRow(at: IndexPath(row: row, section: 0))
+                           as? RepositoryTableViewCell
+                        {
+                            cell.starCountText = newStars.formatted()
+                        }
+                    }
+                }
+
+                liveStarSubscriptions[repo.id] = cancellable
+            } catch {
+                print("Could not subscribe to repo \(repo.id):", error)
+            }
+        }
     }
 }
 
@@ -93,12 +134,9 @@ extension RepositoriesViewController: UITableViewDataSource, UITableViewDelegate
         repositories.count
     }
 
-    func tableView(
-        _ tableView: UITableView,
-        cellForRowAt indexPath: IndexPath
-    ) -> UITableViewCell {
-        let repo = repositories[indexPath.row]
-        // Replacing cell force-cast with a safe empty cell in case of failure
+    func tableView(_ tableView: UITableView,
+                   cellForRowAt indexPath: IndexPath) -> UITableViewCell
+    {
         guard let cell = tableView.dequeueReusableCell(
             withIdentifier: RepositoryTableViewCell.reuseID,
             for: indexPath
@@ -107,15 +145,21 @@ extension RepositoriesViewController: UITableViewDataSource, UITableViewDelegate
             return UITableViewCell()
         }
 
+        let repo = repositories[indexPath.row]
+        let stars = liveStarCounts[repo.id] ?? repo.stargazersCount
+
         cell.name = repo.name
         cell.descriptionText = repo.description
-        cell.starCountText = repo.stargazersCount.formatted()
+        cell.starCountText = stars.formatted()
+
         return cell
     }
 
-    func tableView(_: UITableView, didSelectRowAt indexPath: IndexPath) {
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
         let repo = repositories[indexPath.row]
-        let vc = RepositoryViewController(minimalRepository: repo, gitHubAPI: gitHubAPI)
-        show(vc, sender: self)
+        let viewController = RepositoryViewController(minimalRepository: repo,
+                                          gitHubAPI: gitHubAPI)
+        show(viewController, sender: self)
     }
 }

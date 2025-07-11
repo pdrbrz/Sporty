@@ -42,7 +42,8 @@ public actor MockLiveServer {
             var starsCount = currentStars
 
             while !Task.isCancelled {
-                try await Task.sleep(for: .milliseconds(.random(in: 100 ... 1000)))
+                /// Increased Task trigger time, personal preference.
+                try await Task.sleep(for: .milliseconds(.random(in: 500 ... 2000)))
                 guard let self else { break }
 
                 starsCount += .random(in: 1 ... 3)
